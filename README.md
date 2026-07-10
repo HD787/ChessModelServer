@@ -61,12 +61,26 @@ human-chess-play --checkpoint checkpoints/policy.pt --fen "startpos"
 
 ## Serve Moves To The Web UI
 
-The copied Next.js chess UI lives in `web/`. Once you have a checkpoint, run the
-Python websocket server:
+The copied Next.js chess UI lives in `web/`. Published checkpoints can be pulled
+from Hugging Face into the ignored local `models/` directory:
+
+```bash
+human-chess-download-model
+```
+
+That defaults to:
+
+```bash
+huggingface-cli download hd787/humanchess-650-750-blitz \
+  checkpoints/v3-cnn-128x6-20epoch.pt \
+  --local-dir ./models/humanchess-650-750-blitz
+```
+
+Then run the Python websocket server against the downloaded model directory:
 
 ```bash
 human-chess-serve-ws \
-  --checkpoint-dir checkpoints/tournament-best-models \
+  --checkpoint-dir models/humanchess-650-750-blitz/checkpoints \
   --host 127.0.0.1 \
   --port 8787
 ```

@@ -23,6 +23,9 @@ dev = [
 export = [
   "onnx>=1.16",
 ]
+hf = [
+  "huggingface-hub>=0.24",
+]
 
 [project.scripts]
 human-chess-preprocess = "human_chess_model.cli.preprocess:main"
@@ -32,6 +35,7 @@ human-chess-play = "human_chess_model.cli.play:main"
 human-chess-serve-ws = "human_chess_model.cli.serve_ws:main"
 human-chess-uci = "human_chess_model.cli.uci:main"
 human-chess-export-onnx = "human_chess_model.cli.export_onnx:main"
+human-chess-download-model = "human_chess_model.cli.download_model:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
