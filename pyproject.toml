@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "human-chess-model"
+version = "0.1.0"
+description = "Supervised human-like chess policy model trained from Lichess games."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy>=1.26",
+  "python-chess>=1.999",
+  "torch>=2.2",
+  "websockets>=13.0",
+  "zstandard>=0.22",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+]
+export = [
+  "onnx>=1.16",
+]
+
+[project.scripts]
+human-chess-preprocess = "human_chess_model.cli.preprocess:main"
+human-chess-train = "human_chess_model.cli.train:main"
+human-chess-eval = "human_chess_model.cli.eval:main"
+human-chess-play = "human_chess_model.cli.play:main"
+human-chess-serve-ws = "human_chess_model.cli.serve_ws:main"
+human-chess-uci = "human_chess_model.cli.uci:main"
+human-chess-export-onnx = "human_chess_model.cli.export_onnx:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
