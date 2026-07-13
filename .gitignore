@@ -8,8 +8,10 @@ node_modules/
 web/
 
 data/
+artifacts/
 checkpoints/
 models/
+model-server.log
 *.pt
 *.pth
 *.ckpt

@@ -21,11 +21,12 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     device = resolve_device(args.device)
-    model, _ = load_model(args.checkpoint, device=device)
+    model, checkpoint = load_model(args.checkpoint, device=device)
+    inference_device = checkpoint.get("inference_device", device)
     board = board_from_fen(args.fen)
-    sampled = sample_move(model, board, device=device, temperature=args.temperature, top_p=args.top_p)
+    sampled = sample_move(model, board, device=inference_device, temperature=args.temperature, top_p=args.top_p)
     print(f"sampled {sampled.uci()}")
-    for move, prob in rank_moves(model, board, device=device)[: args.top]:
+    for move, prob in rank_moves(model, board, device=inference_device)[: args.top]:
         print(f"{move.uci()}\t{prob:.6f}")
 
 

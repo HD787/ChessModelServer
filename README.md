@@ -73,6 +73,7 @@ That defaults to:
 ```bash
 huggingface-cli download hd787/humanchess-650-750-blitz \
   checkpoints/v3-cnn-128x6-20epoch.pt \
+  artifacts/v3-cnn-128x6-20epoch-int8.ts \
   --local-dir ./models/humanchess-650-750-blitz
 ```
 

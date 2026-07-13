@@ -5,6 +5,8 @@ from pathlib import Path
 
 DEFAULT_REPO_ID = "hd787/humanchess-650-750-blitz"
 DEFAULT_FILENAME = "checkpoints/v3-cnn-128x6-20epoch.pt"
+DEFAULT_INT8_FILENAME = "artifacts/v3-cnn-128x6-20epoch-int8.ts"
+DEFAULT_FILENAMES = [DEFAULT_FILENAME, DEFAULT_INT8_FILENAME]
 DEFAULT_LOCAL_DIR = "models/humanchess-650-750-blitz"
 
 
@@ -23,7 +25,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def requested_filenames(args: argparse.Namespace) -> list[str]:
-    return args.filename or [DEFAULT_FILENAME]
+    return args.filename or DEFAULT_FILENAMES
 
 
 def main() -> None:

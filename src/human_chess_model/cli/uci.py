@@ -53,6 +53,7 @@ def main() -> None:
     args = parse_args()
     device = resolve_device(args.device)
     model, checkpoint = load_model(args.checkpoint, device=device)
+    inference_device = checkpoint.get("inference_device", device)
     name = args.name or checkpoint.get("args", {}).get("out", args.checkpoint).split("/")[-1]
     board = chess.Board()
     temperature = args.temperature
@@ -104,7 +105,7 @@ def main() -> None:
                 if board.is_game_over():
                     print_line("bestmove 0000")
                     continue
-                move = sample_move(model, board, device=device, temperature=temperature, top_p=top_p)
+                move = sample_move(model, board, device=inference_device, temperature=temperature, top_p=top_p)
                 print_line(f"bestmove {move.uci()}")
             except Exception as exc:
                 print_line(f"info string move selection failed: {exc}")

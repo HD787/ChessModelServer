@@ -1,12 +1,12 @@
 import argparse
 
-from human_chess_model.cli.download_model import DEFAULT_FILENAME, requested_filenames
+from human_chess_model.cli.download_model import DEFAULT_FILENAMES, requested_filenames
 
 
-def test_requested_filenames_defaults_to_published_checkpoint() -> None:
+def test_requested_filenames_defaults_to_published_models() -> None:
     args = argparse.Namespace(filename=[])
 
-    assert requested_filenames(args) == [DEFAULT_FILENAME]
+    assert requested_filenames(args) == DEFAULT_FILENAMES
 
 
 def test_requested_filenames_uses_explicit_values() -> None:

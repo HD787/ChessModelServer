@@ -1,6 +1,9 @@
+import argparse
+
 import pytest
 
 from human_chess_model.cli.serve_ws import inference_options
+from human_chess_model.cli.serve_ws import checkpoint_paths
 
 
 def test_inference_options_uses_server_defaults() -> None:
@@ -26,3 +29,15 @@ def test_inference_options_allows_request_argmax() -> None:
 def test_inference_options_rejects_invalid_values(message: dict[str, float], error: str) -> None:
     with pytest.raises(ValueError, match=error):
         inference_options(message, default_temperature=1.0, default_top_p=1.0)
+
+
+def test_checkpoint_paths_discovers_torchscript_artifacts(tmp_path) -> None:
+    checkpoint = tmp_path / "model.pt"
+    torchscript = tmp_path / "model.ts"
+    ignored = tmp_path / "notes.txt"
+    checkpoint.write_bytes(b"checkpoint")
+    torchscript.write_bytes(b"torchscript")
+    ignored.write_text("ignore me")
+    args = argparse.Namespace(checkpoint=[], checkpoint_dir=[str(tmp_path)])
+
+    assert checkpoint_paths(args) == [checkpoint, torchscript]

@@ -12,6 +12,8 @@ from human_chess_model.checkpoint import load_model
 from human_chess_model.cli.train import resolve_device
 from human_chess_model.inference import board_from_fen, sample_move
 
+MODEL_SUFFIXES = {".pt", ".pth", ".ts", ".torchscript"}
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Serve one or more chess policy checkpoints over websocket.")
@@ -49,7 +51,9 @@ def inference_options(message: dict[str, Any], *, default_temperature: float, de
 def checkpoint_paths(args: argparse.Namespace) -> list[Path]:
     paths = [Path(item) for item in args.checkpoint]
     for item in args.checkpoint_dir:
-        paths.extend(sorted(Path(item).rglob("*.pt")))
+        paths.extend(
+            sorted(path for path in Path(item).rglob("*") if path.is_file() and path.suffix.lower() in MODEL_SUFFIXES)
+        )
     unique = []
     seen = set()
     for path in paths:
@@ -74,16 +78,19 @@ async def main_async() -> None:
     args = parse_args()
     device = resolve_device(args.device)
     models = {}
+    model_devices = {}
     model_list = []
     for path in checkpoint_paths(args):
         model, checkpoint = load_model(path, device=device)
         mid = model_id(path)
         models[mid] = model
+        model_devices[mid] = checkpoint.get("inference_device", device)
         model_list.append(
             {
                 "id": mid,
                 "name": path.stem,
                 "path": str(path),
+                "format": checkpoint.get("args", {}).get("format", "checkpoint"),
                 "epoch": checkpoint.get("epoch"),
                 "metrics": checkpoint.get("metrics", {}),
             }
@@ -143,7 +150,7 @@ async def main_async() -> None:
                 move = sample_move(
                     model,
                     board,
-                    device=device,
+                    device=model_devices[requested_model_id],
                     temperature=temperature,
                     top_p=top_p,
                 )
