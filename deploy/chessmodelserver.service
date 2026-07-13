@@ -1,0 +1,17 @@
+[Unit]
+Description=Chess Model Websocket Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=hd116527
+WorkingDirectory=/home/hd116527/ChessModelServer
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONPATH=/home/hd116527/ChessModelServer/src
+ExecStart=/home/hd116527/ChessModelServer/.venv/bin/python -m human_chess_model.cli.serve_ws --checkpoint /home/hd116527/ChessModelServer/models/humanchess-900-1000-blitz-checkmates/artifacts/cnn-128x6-900-1000-blitz-checkmates-int8.ts --host 127.0.0.1 --port 8787
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
