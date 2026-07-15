@@ -4,6 +4,9 @@ import pytest
 
 from human_chess_model.cli.serve_ws import inference_options
 from human_chess_model.cli.serve_ws import checkpoint_paths
+from human_chess_model.cli.serve_ws import parse_model_aliases
+from human_chess_model.cli.serve_ws import slugify_model_id
+from human_chess_model.cli.serve_ws import unique_model_id
 
 
 def test_inference_options_uses_server_defaults() -> None:
@@ -41,3 +44,44 @@ def test_checkpoint_paths_discovers_torchscript_artifacts(tmp_path) -> None:
     args = argparse.Namespace(checkpoint=[], checkpoint_dir=[str(tmp_path)])
 
     assert checkpoint_paths(args) == [checkpoint, torchscript]
+
+
+def test_parse_model_aliases_supports_positional_aliases(tmp_path) -> None:
+    first = tmp_path / "actual-cnn-filename.pt"
+    second = tmp_path / "actual-transformer-filename.ts"
+
+    assert parse_model_aliases(["Beginner Blitz", "Intermediate Blitz"], [first, second]) == {
+        first: "Beginner Blitz",
+        second: "Intermediate Blitz",
+    }
+
+
+def test_parse_model_aliases_supports_keyed_aliases(tmp_path) -> None:
+    checkpoint_dir = tmp_path / "published-models"
+    checkpoint_dir.mkdir()
+    checkpoint = checkpoint_dir / "private-checkpoint-name.pt"
+
+    assert parse_model_aliases(["private-checkpoint-name=Public Name"], [checkpoint]) == {
+        checkpoint: "Public Name",
+    }
+    assert parse_model_aliases([f"{checkpoint}=Path Matched Name"], [checkpoint]) == {
+        checkpoint: "Path Matched Name",
+    }
+    assert parse_model_aliases(["published-models/private-checkpoint-name=Default Id Matched Name"], [checkpoint]) == {
+        checkpoint: "Default Id Matched Name",
+    }
+
+
+def test_parse_model_aliases_rejects_unknown_key(tmp_path) -> None:
+    checkpoint = tmp_path / "model.pt"
+
+    with pytest.raises(ValueError, match="unknown --model-alias source"):
+        parse_model_aliases(["missing=Public Name"], [checkpoint])
+
+
+def test_alias_ids_are_public_slugs_and_unique() -> None:
+    used = set()
+
+    assert slugify_model_id("650-750 Blitz Final") == "650-750-blitz-final"
+    assert unique_model_id(slugify_model_id("Same Name"), used) == "same-name"
+    assert unique_model_id(slugify_model_id("Same Name"), used) == "same-name-2"

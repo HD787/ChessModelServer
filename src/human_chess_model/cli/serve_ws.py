@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +24,15 @@ def parse_args() -> argparse.Namespace:
         action="append",
         default=[],
         help="Directory to scan recursively for .pt checkpoints. Can be passed multiple times.",
+    )
+    parser.add_argument(
+        "--model-alias",
+        action="append",
+        default=[],
+        help=(
+            "Public model name. Pass once per loaded checkpoint, or use SOURCE=NAME where SOURCE matches "
+            "a checkpoint path, filename, stem, or default model id. Aliases replace the public model id."
+        ),
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8787)
@@ -74,22 +84,82 @@ def model_id(path: Path) -> str:
     return path.stem
 
 
+def alias_lookup_keys(path: Path) -> set[str]:
+    resolved = path.resolve()
+    return {str(path), str(resolved), path.name, path.stem, model_id(path)}
+
+
+def parse_model_aliases(alias_values: list[str], paths: list[Path]) -> dict[Path, str]:
+    positional = []
+    keyed = {}
+    for value in alias_values:
+        if "=" in value:
+            key, alias = value.split("=", 1)
+            key = key.strip()
+            alias = alias.strip()
+            if not key or not alias:
+                raise ValueError("--model-alias mappings must use SOURCE=NAME with both sides present")
+            keyed[key] = alias
+            continue
+        alias = value.strip()
+        if not alias:
+            raise ValueError("--model-alias cannot be empty")
+        positional.append(alias)
+
+    if len(positional) > len(paths):
+        raise ValueError("received more positional --model-alias values than loaded checkpoints")
+
+    aliases = {path: positional[index] for index, path in enumerate(paths[: len(positional)])}
+    matched_keys = set()
+    for path in paths:
+        keys = alias_lookup_keys(path)
+        for key, alias in keyed.items():
+            if key in keys:
+                aliases[path] = alias
+                matched_keys.add(key)
+
+    unknown_keys = sorted(set(keyed) - matched_keys)
+    if unknown_keys:
+        raise ValueError(f"unknown --model-alias source: {', '.join(unknown_keys)}")
+    return aliases
+
+
+def slugify_model_id(value: str) -> str:
+    slug = re.sub(r"[^a-zA-Z0-9]+", "-", value.strip().lower()).strip("-")
+    return slug or "model"
+
+
+def unique_model_id(base: str, used_ids: set[str]) -> str:
+    candidate = base
+    suffix = 2
+    while candidate in used_ids:
+        candidate = f"{base}-{suffix}"
+        suffix += 1
+    used_ids.add(candidate)
+    return candidate
+
+
 async def main_async() -> None:
     args = parse_args()
     device = resolve_device(args.device)
     models = {}
     model_devices = {}
     model_list = []
-    for path in checkpoint_paths(args):
+    paths = checkpoint_paths(args)
+    aliases = parse_model_aliases(args.model_alias, paths)
+    used_model_ids = set()
+    for path in paths:
         model, checkpoint = load_model(path, device=device)
-        mid = model_id(path)
+        alias = aliases.get(path)
+        public_name = alias or path.stem
+        public_id_base = slugify_model_id(alias) if alias else model_id(path)
+        mid = unique_model_id(public_id_base, used_model_ids)
         models[mid] = model
         model_devices[mid] = checkpoint.get("inference_device", device)
         model_list.append(
             {
                 "id": mid,
-                "name": path.stem,
-                "path": str(path),
+                "name": public_name,
                 "format": checkpoint.get("args", {}).get("format", "checkpoint"),
                 "epoch": checkpoint.get("epoch"),
                 "metrics": checkpoint.get("metrics", {}),

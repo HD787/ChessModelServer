@@ -86,6 +86,29 @@ human-chess-serve-ws \
   --port 8787
 ```
 
+Use `--model-alias` when you want the browser to see a public name instead of
+the checkpoint filename. Aliases become the public model id and display name,
+and checkpoint paths are not included in the websocket model list:
+
+```bash
+human-chess-serve-ws \
+  --checkpoint models/humanchess-650-750-blitz/checkpoints/v3-cnn-128x6-20epoch.pt \
+  --model-alias "650-750 Blitz" \
+  --host 127.0.0.1 \
+  --port 8787
+```
+
+For `--checkpoint-dir`, use `SOURCE=NAME`; `SOURCE` can be the filename, stem,
+path, or default model id:
+
+```bash
+human-chess-serve-ws \
+  --checkpoint-dir models/humanchess-650-750-blitz/checkpoints \
+  --model-alias "v3-cnn-128x6-20epoch=650-750 Blitz" \
+  --host 127.0.0.1 \
+  --port 8787
+```
+
 In another terminal:
 
 ```bash
