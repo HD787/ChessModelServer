@@ -86,6 +86,22 @@ human-chess-serve-ws \
   --port 8787
 ```
 
+The same runner can serve HTTP instead of websockets:
+
+```bash
+human-chess-serve-http \
+  --checkpoint artifacts/v3-cnn-128x6-20epoch-int8.ts \
+  --model-alias "650-750 Blitz" \
+  --host 127.0.0.1 \
+  --port 8787
+```
+
+HTTP endpoints:
+
+- `GET /health` returns `{"ok": true}`
+- `GET /models` returns the available public model ids and names
+- `POST /move` accepts `{"fen":"startpos","modelId":"650-750-blitz","temperature":0,"topP":1}` and returns `{"type":"engineMove","bestmove":"..."}`
+
 Use `--model-alias` when you want the browser to see a public name instead of
 the checkpoint filename. Aliases become the public model id and display name,
 and checkpoint paths are not included in the websocket model list:

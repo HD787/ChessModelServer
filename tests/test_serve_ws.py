@@ -1,7 +1,12 @@
 import argparse
+import threading
+
+import chess
 
 import pytest
 
+from human_chess_model.cli import serve_ws
+from human_chess_model.cli.serve_ws import ModelRunner
 from human_chess_model.cli.serve_ws import inference_options
 from human_chess_model.cli.serve_ws import checkpoint_paths
 from human_chess_model.cli.serve_ws import parse_model_aliases
@@ -85,3 +90,41 @@ def test_alias_ids_are_public_slugs_and_unique() -> None:
     assert slugify_model_id("650-750 Blitz Final") == "650-750-blitz-final"
     assert unique_model_id(slugify_model_id("Same Name"), used) == "same-name"
     assert unique_model_id(slugify_model_id("Same Name"), used) == "same-name-2"
+
+
+def test_runner_builds_engine_move_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_sample_move(*args, **kwargs):
+        return chess.Move.from_uci("e2e4")
+
+    monkeypatch.setattr(serve_ws, "sample_move", fake_sample_move)
+    runner = ModelRunner(
+        models={"beginner": object()},
+        model_devices={"beginner": "cpu"},
+        model_list=[{"id": "beginner", "name": "Beginner"}],
+        default_model_id="beginner",
+        default_temperature=0.7,
+        default_top_p=0.9,
+        inference_lock=threading.Lock(),
+    )
+
+    payload = runner.engine_move_payload({"requestId": "abc", "fen": "startpos"})
+
+    assert payload["type"] == "engineMove"
+    assert payload["bestmove"] == "e2e4"
+    assert payload["modelId"] == "beginner"
+    assert payload["requestId"] == "abc"
+
+
+def test_runner_rejects_unknown_model() -> None:
+    runner = ModelRunner(
+        models={"beginner": object()},
+        model_devices={"beginner": "cpu"},
+        model_list=[{"id": "beginner", "name": "Beginner"}],
+        default_model_id="beginner",
+        default_temperature=1.0,
+        default_top_p=1.0,
+        inference_lock=threading.Lock(),
+    )
+
+    with pytest.raises(ValueError, match="unknown modelId"):
+        runner.engine_move_payload({"modelId": "missing", "fen": "startpos"})

@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from dataclasses import dataclass
+from http import HTTPStatus
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import re
 from pathlib import Path
+import threading
 from typing import Any
 
 import websockets
@@ -16,8 +20,62 @@ from human_chess_model.inference import board_from_fen, sample_move
 MODEL_SUFFIXES = {".pt", ".pth", ".ts", ".torchscript"}
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Serve one or more chess policy checkpoints over websocket.")
+@dataclass
+class ModelRunner:
+    models: dict[str, Any]
+    model_devices: dict[str, str]
+    model_list: list[dict[str, Any]]
+    default_model_id: str
+    default_temperature: float
+    default_top_p: float
+    inference_lock: threading.Lock
+
+    def ready_payload(self) -> dict[str, Any]:
+        return {
+            "type": "ready",
+            "message": "human chess model runner ready",
+            "models": self.model_list,
+            "defaultModelId": self.default_model_id,
+        }
+
+    def models_payload(self) -> dict[str, Any]:
+        return {"type": "models", "models": self.model_list, "defaultModelId": self.default_model_id}
+
+    def engine_move_payload(self, message: dict[str, Any]) -> dict[str, Any]:
+        request_id = message.get("requestId")
+        requested_model_id = message.get("modelId") or self.default_model_id
+        model = self.models.get(requested_model_id)
+        if model is None:
+            raise ValueError(f"unknown modelId: {requested_model_id}")
+
+        if "fen" not in message:
+            raise ValueError("fen is required")
+
+        board = board_from_fen(message["fen"])
+        temperature, top_p = inference_options(
+            message,
+            default_temperature=self.default_temperature,
+            default_top_p=self.default_top_p,
+        )
+        with self.inference_lock:
+            move = sample_move(
+                model,
+                board,
+                device=self.model_devices[requested_model_id],
+                temperature=temperature,
+                top_p=top_p,
+            )
+        return {
+            **message,
+            "type": "engineMove",
+            "bestmove": move.uci(),
+            "modelId": requested_model_id,
+            "requestId": request_id,
+        }
+
+
+def parse_args(default_transport: str = "ws") -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Serve one or more chess policy checkpoints.")
     parser.add_argument("--checkpoint", action="append", default=[], help="Checkpoint path. Can be passed multiple times.")
     parser.add_argument(
         "--checkpoint-dir",
@@ -36,16 +94,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8787)
+    parser.add_argument("--transport", choices=["ws", "http"], default=default_transport)
     parser.add_argument("--device", default="auto")
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--top-p", type=float, default=1.0)
     return parser.parse_args()
-
-
-def response(payload: dict[str, Any], **updates: Any) -> str:
-    result = dict(payload)
-    result.update(updates)
-    return json.dumps(result)
 
 
 def inference_options(message: dict[str, Any], *, default_temperature: float, default_top_p: float) -> tuple[float, float]:
@@ -139,8 +192,7 @@ def unique_model_id(base: str, used_ids: set[str]) -> str:
     return candidate
 
 
-async def main_async() -> None:
-    args = parse_args()
+def load_runner(args: argparse.Namespace) -> ModelRunner:
     device = resolve_device(args.device)
     models = {}
     model_devices = {}
@@ -167,18 +219,21 @@ async def main_async() -> None:
         )
         print(f"loaded {mid} from {path}")
     default_model_id = model_list[0]["id"]
+    return ModelRunner(
+        models=models,
+        model_devices=model_devices,
+        model_list=model_list,
+        default_model_id=default_model_id,
+        default_temperature=args.temperature,
+        default_top_p=args.top_p,
+        inference_lock=threading.Lock(),
+    )
+
+
+async def serve_websocket(args: argparse.Namespace, runner: ModelRunner) -> None:
 
     async def handle(websocket) -> None:
-        await websocket.send(
-            json.dumps(
-                {
-                    "type": "ready",
-                    "message": "human chess model runner ready",
-                    "models": model_list,
-                    "defaultModelId": default_model_id,
-                }
-            )
-        )
+        await websocket.send(json.dumps(runner.ready_payload()))
         async for raw in websocket:
             try:
                 message = json.loads(raw)
@@ -187,9 +242,7 @@ async def main_async() -> None:
                     await websocket.send(json.dumps({"type": "pong"}))
                     continue
                 if message.get("type") == "models":
-                    await websocket.send(
-                        json.dumps({"type": "models", "models": model_list, "defaultModelId": default_model_id})
-                    )
+                    await websocket.send(json.dumps(runner.models_payload()))
                     continue
                 if message.get("type") != "engineMove":
                     await websocket.send(
@@ -197,42 +250,7 @@ async def main_async() -> None:
                     )
                     continue
 
-                requested_model_id = message.get("modelId") or default_model_id
-                model = models.get(requested_model_id)
-                if model is None:
-                    await websocket.send(
-                        json.dumps(
-                            {
-                                "type": "error",
-                                "error": f"unknown modelId: {requested_model_id}",
-                                "requestId": request_id,
-                            }
-                        )
-                    )
-                    continue
-
-                board = board_from_fen(message["fen"])
-                temperature, top_p = inference_options(
-                    message,
-                    default_temperature=args.temperature,
-                    default_top_p=args.top_p,
-                )
-                move = sample_move(
-                    model,
-                    board,
-                    device=model_devices[requested_model_id],
-                    temperature=temperature,
-                    top_p=top_p,
-                )
-                await websocket.send(
-                    response(
-                        message,
-                        type="engineMove",
-                        bestmove=move.uci(),
-                        modelId=requested_model_id,
-                        requestId=request_id,
-                    )
-                )
+                await websocket.send(json.dumps(runner.engine_move_payload(message)))
             except Exception as exc:
                 request_id = None
                 try:
@@ -241,13 +259,91 @@ async def main_async() -> None:
                     pass
                 await websocket.send(json.dumps({"type": "error", "error": str(exc), "requestId": request_id}))
 
-    print(f"serving {len(models)} model(s) on ws://{args.host}:{args.port}")
+    print(f"serving {len(runner.models)} model(s) on ws://{args.host}:{args.port}")
     async with websockets.serve(handle, args.host, args.port):
         await asyncio.Future()
 
 
+def make_http_handler(runner: ModelRunner):
+    class HumanChessHttpHandler(BaseHTTPRequestHandler):
+        server_version = "HumanChessModelHTTP/0.1"
+
+        def log_message(self, format: str, *args: Any) -> None:
+            print(f"{self.address_string()} - {format % args}")
+
+        def end_headers(self) -> None:
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type")
+            super().end_headers()
+
+        def send_json(self, status: HTTPStatus, payload: dict[str, Any]) -> None:
+            body = json.dumps(payload).encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def read_json(self) -> dict[str, Any]:
+            length = int(self.headers.get("Content-Length", "0"))
+            if length <= 0:
+                return {}
+            return json.loads(self.rfile.read(length).decode("utf-8"))
+
+        def do_OPTIONS(self) -> None:
+            self.send_response(HTTPStatus.NO_CONTENT)
+            self.end_headers()
+
+        def do_GET(self) -> None:
+            if self.path == "/health":
+                self.send_json(HTTPStatus.OK, {"ok": True})
+                return
+            if self.path == "/models":
+                self.send_json(HTTPStatus.OK, runner.models_payload())
+                return
+            self.send_json(HTTPStatus.NOT_FOUND, {"type": "error", "error": "not found"})
+
+        def do_POST(self) -> None:
+            if self.path != "/move":
+                self.send_json(HTTPStatus.NOT_FOUND, {"type": "error", "error": "not found"})
+                return
+            request_id = None
+            try:
+                message = self.read_json()
+                request_id = message.get("requestId")
+                payload = runner.engine_move_payload(message)
+                self.send_json(HTTPStatus.OK, payload)
+            except Exception as exc:
+                self.send_json(
+                    HTTPStatus.BAD_REQUEST,
+                    {"type": "error", "error": str(exc), "requestId": request_id},
+                )
+
+    return HumanChessHttpHandler
+
+
+def serve_http(args: argparse.Namespace, runner: ModelRunner) -> None:
+    server = ThreadingHTTPServer((args.host, args.port), make_http_handler(runner))
+    print(f"serving {len(runner.models)} model(s) on http://{args.host}:{args.port}")
+    server.serve_forever()
+
+
+async def main_async(default_transport: str = "ws") -> None:
+    args = parse_args(default_transport=default_transport)
+    runner = load_runner(args)
+    if args.transport == "http":
+        await asyncio.to_thread(serve_http, args, runner)
+        return
+    await serve_websocket(args, runner)
+
+
 def main() -> None:
     asyncio.run(main_async())
+
+
+def main_http() -> None:
+    asyncio.run(main_async(default_transport="http"))
 
 
 if __name__ == "__main__":
